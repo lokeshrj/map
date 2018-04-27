@@ -1,0 +1,52 @@
+<html>
+
+<head>
+    <style>
+        html,
+        body,
+        iframe {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            border: none;
+            overflow: hidden;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- <iframe id="childContainer" src="http://ljagasia-ltm3.internal.salesforce.com:6109/resource/1524603991000/map" sandbox="allow-scripts" /> -->
+    <iframe id="childContainer" src="primitive-map.html" sandbox="allow-scripts"></iframe>
+
+    <script>
+        var childFrame = document.getElementById('childContainer');
+        window.addEventListener('message', function (event) {
+            console.log('Container Incoming & Relaying', event.origin, event.data);
+            // TODO Enable Source Validation
+            // if (event.origin !== 'trusted origin') {
+            //     return;
+            // }
+            childFrame.contentWindow.postMessage(event.data, "*");   // TODO: Enable Target Validation
+        }, false);
+    </script>
+</body>
+</html>
+
+<!-- Tests
+Until a testing methodology/ framework for static files is in place,
+we are enumerating the test cases here in pseudocode
+
+describe('message relay', () => {
+    it('message relay to child', () => {
+        var outgoing = { property1: 'value1', property2: 'value2' };
+
+        var childFrame = document.getElementById('childContainer');
+        childFrame.contentWindow.addEventListener('message', e => {
+            var incoming = e.data;
+            assert(incoming.toBe(outgoing));
+        })
+
+        childFrame.contentWindow.postMessage(outgoing, '*');
+    })
+}) -->
