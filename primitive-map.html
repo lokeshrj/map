@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        #map {
+            height: 100%;
+        }
+
+        html,
+        body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            border: none;
+            overflow: hidden;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+    <script src="https://cdn.jsdelivr.net/bluebird/latest/bluebird.core.min.js" async defer></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC9gPPY94Vs1Ooh9ee_sqsgUBGRyUMOgYc&callback=initMap" async
+        defer></script>
+    <script>
+        var map;
+        const geocodeEndpoint = 'https://maps.googleapis.com/maps/api/geocode/json';
+        const apiKey = 'AIzaSyDCo-EzogbigVapqH2I7UlWTUWOy7zOSoY';   // TODO: Load this from ConfigProvider once it is ready.
+        // ApexMapResponseBuilder:221   Section googleKey = Config.getAppConfig().get("VisualforceMaps").getField("GoogleKey", "VisualforceMaps", Section.class);
+        // CoreMapUtilsImpl:68  String clientKey = isGoogleBusinessClientId(googleKey) ? googleKey.getField("ClientId", "GoogleMapsKey", String.class) : googleKey.getField("ApiKey", "GoogleMapsKey", String.class);
+        const MIN_ZOOM = 0;
+        const MAX_ZOOM = 21;
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: 37.790120, lng: -122.396879 },
+                zoom: 0
+            });
+
+            // Remove infoWindow from markers when clicking anywhere on map
+            google.maps.event.addDomListener(map, 'click', function () {
+                mapData.activeMarkerId = 'none';
+            });
+        }
+    </script>
+    <script>
+
+        var mapData = {
+            centerValue: null,
+            markerValues: [],
+            activeMarkerKey: null,
+            hoverMarkerKey: null,
+
+            apiMarkers: [],
+            apiInfoWindows: [],
+
+            set center(center) {
+                if (this.center !== center) {
+                    this.centerValue = center;
+                    getComputedLatLng(center)
+                        .then(function (coordinates) {
+                            map.setCenter(coordinates)
+                        });
+                }
+            },
+
+            get center() {
+                return this.centerValue;
+            },
+
+            set markers(markers) {
+                this.markerValues = markers;
+                var markerPromises = markers.map(function (marker) {
+                    return getComputedLatLng(marker);
+                });
+
+
+                Promise.all(markerPromises).then(function (positions) {
+                    for (var index = 0; index < positions.length; index++) {
+                        var position = positions[index];
+                        let apiMarker = new google.maps.Marker({
+                            position: position,
+                            animation: google.maps.Animation.DROP,
+                            map: map
+                        });
+                        const title = mapData.markers[index].title || '';
+                        const description =
+                            mapData.markers[index].description || '';
+                        const infoWindow = new google.maps.InfoWindow({
+                            content: '<div>' +
+                                '<div class="slds-text-title_caps"><b>' + title + '</b></div>' +
+                                '<div class="slds-text-body_regular">' + description + '</div>' +
+                                '</div>',
+                        });
+                        apiMarker.addListener('click', function () {
+                            mapData.activeMarkerId = mapData.markers[this].key;
+                        }.bind(index));
+
+                        mapData.apiMarkers.push(apiMarker);
+                        mapData.apiInfoWindows.push(infoWindow);
+                    };
+
+                    const bounds = getComputedMapBounds(mapData.apiMarkers);
+                    // optionally calculate center
+                    if (!mapData.center) {
+                        map.panTo(bounds.getCenter());
+                    }
+
+                    // optionally calculate zoom
+                    if (!mapData.zoomLevel) {
+                        const zoomLevel = getComputedZoomByBounds(
+                            map,
+                            bounds
+                        );
+                        map.setZoom(zoomLevel);
+                    }
+                });
+            },
+
+            get markers() {
+                return this.markerValues;
+            },
+
+            set zoomLevel(zoomLevel) {
+                this.zoomValue = zoomLevel;
+                map.setZoom(zoomLevel);
+            },
+
+            get zoomLevel() {
+                return this.zoomValue;
+            },
+
+            /**
+             * setter for key of the active marker.
+             * @param {String} key - the key/guid of the active marker.
+             */
+            set activeMarkerId(key) {
+                if (key !== this.activeMarkerKey) {
+                    this.activeMarkerKey = key;
+                    if (
+                        this.markers.length &&
+                        this.apiInfoWindows.length &&
+                        this.apiMarkers.length
+                    ) {
+                        for (var i = 0; i < this.markers.length; i++) {
+                            var marker = this.markers[i];
+                            if (marker.key === key) {
+                                this.apiInfoWindows[i].open(
+                                    map,
+                                    this.apiMarkers[i]
+                                );
+                            } else {
+                                this.apiInfoWindows[i].close();
+                            }
+                        };
+                    }
+                }
+            },
+
+            /**
+             * getter for key of the active marker.
+             * @returns {String} the key/guid of the active marker.
+             */
+            get activeMarker() {
+                return this.activeMarkerKey;
+            },
+
+            set hoverMarkerId(key) {
+                if (key !== this.hoverMarkerKey) {
+                    this.hoverMarkerKey = key;
+                    if (this.markers.length && this.apiMarkers.length) {
+                        for (var i = 0; i < this.markers.length; i++) {
+                            var marker = this.markers[i];
+                            if (marker.key === key) {
+                                this.apiMarkers[i].setAnimation(google.maps.Animation.BOUNCE);
+                                this.apiMarkers[i].setAnimation();
+                            } else {
+                                this.apiMarkers[i].setAnimation();
+                            }
+                        };
+                    }
+                }
+            },
+
+            /**
+             * getter for key of the hovered marker.
+             * @returns {String} the key/guid of the hovered marker.
+             */
+            get hoverMarker() {
+                return this.mapData.hoverMarkerKey;
+            }
+        };
+
+        function getComputedLatLng(marker) {
+            return new Promise(function (resolve, reject) {
+                if (marker && marker.Latitude && marker.Longitude) {
+                    var lat = marker.Latitude, lng = marker.Longitude;
+                    if (typeof marker.Latitude === 'string') {
+                        lat = Number.parseFloat(marker.Latitude);
+                        lng = Number.parseFloat(marker.Longitude);
+                    }
+                    resolve({ lat: lat, lng: lng });
+                } else if (
+                    marker &&
+                    (marker.Country ||
+                        marker.City ||
+                        marker.PostalCode ||
+                        marker.mapData)
+                ) {
+                    const address = [
+                        marker.Street,
+                        marker.City,
+                        marker.PostalCode,
+                        marker.mapData,
+                        marker.Country,
+                    ].join(' ');
+                    resolve(geocode(address));
+                } else {
+                    reject(
+                        new Error(
+                            'Invalid marker format. Please specify both Latitude and Longitude, or one of PostalCode, City, State or Country'
+                        )
+                    );
+                }
+            });
+        }
+
+        function geocode(address) {
+            return new Promise(function (resolve, reject) {
+                var requestURL = geocodeEndpoint + "?key=" + apiKey + "&address=" + encodeURIComponent(address);
+                var request = new XMLHttpRequest();
+                request.addEventListener('load', requestComplete);
+                request.addEventListener('error', requestFailed);
+                request.open('GET', requestURL);
+                request.send();
+
+                function requestComplete() {
+                    if (this.status === 200) {
+                        var data = JSON.parse(this.responseText);
+                        if (data && data.status === 'OK' && data.results.length === 1) {
+                            resolve(data.results[0].geometry.location);
+                        }
+                    }
+                }
+
+                function requestFailed() {
+                    reject(new Error('Unable to geocode ' + address));
+                }
+            });
+        };
+
+        function getComputedMapBounds(apiMarkers) {
+            var bounds = new google.maps.LatLngBounds();
+            for (var i = 0; i < apiMarkers.length; i++) {
+                bounds.extend(apiMarkers[i].position);
+            }
+            return bounds;
+        }
+
+        function getComputedZoomByBounds(map, bounds) {
+            const fitPadding = 40; // comfortable margins around the markers
+
+            // calculate min,max zoom supported by map
+            const maxZoom =
+                map.mapTypes.get(map.getMapTypeId()).maxZoom || MAX_ZOOM;
+            const minZoom =
+                map.mapTypes.get(map.getMapTypeId()).minZoom || MIN_ZOOM;
+
+            // get bound corners surrounding all markers
+            const ne = map.getProjection().fromLatLngToPoint(bounds.getNorthEast());
+            const sw = map.getProjection().fromLatLngToPoint(bounds.getSouthWest());
+
+            // calculate bound width and height
+            const worldCoordWidth = Math.abs(ne.x - sw.x);
+            const worldCoordHeight = Math.abs(ne.y - sw.y);
+
+            // keep zooming in until bounds rectangle (with padding) is still visible in viewport
+            for (let zoom = maxZoom; zoom >= minZoom; --zoom) {
+                if (
+                    worldCoordWidth * (1 << zoom) + 2 * fitPadding <
+                    map.getDiv().clientWidth &&
+                    worldCoordHeight * (1 << zoom) + 2 * fitPadding <
+                    map.getDiv().clientHeight
+                ) {
+                    return zoom;
+                }
+            }
+            return 0;
+        }
+
+        window.addEventListener("message", processMessage);
+        function processMessage(event) {
+            console.log('Primitive-Map Incoming', event.origin, event.data);
+
+            // if (event.origin !== 'trusted origin') {
+            //     return;
+            // } TODO: Enable Source Validation
+            setTimeout(function () {
+                var incoming = event.data;
+
+                if (incoming && incoming.center) {
+                    mapData.center = incoming.center;
+                }
+                if (incoming && incoming.zoomLevel) {
+                    mapData.zoomLevel = incoming.zoomLevel;
+                }
+                if (incoming && incoming.markers) {
+                    mapData.markers = incoming.markers;
+                }
+                if (incoming && incoming.activeMarkerId) {
+                    mapData.activeMarkerId = incoming.activeMarkerId;
+                }
+                if (incoming && incoming.hoverMarkerId) {
+                    mapData.hoverMarkerId = incoming.hoverMarkerId;
+                }
+            }, 0);
+        }
+    </script>
+</body>
+
+</html>
+
+<!-- Tests
+Until a testing methodology/ framework for static files is in place,
+we are enumerating the test cases here in pseudocode
+
+describe('primitive-map', () => {
+    describe('postMessage processing', () => {
+        it('valid data', () => {
+            var incoming = {
+                zoomLevel = 14;
+                center = {
+                    Street: '121 Spear St',
+                    City: 'San Francisco'
+                    // City: 'Seattle'
+                };
+                mapMarkers = {
+                    markers: [
+                        {
+                            // key: '4a4fde1d-d018-d7a3-e2c0-0ac2b5f2b6a3',    //guid(),
+                            // 50 Fremont
+                            Latitude: '37.790197',
+                            Longitude: '-122.396879',
+
+                            title: 'Salesforce West',
+                            description: 'Our future home.'
+                        },
+                        {
+                            // key: '12d39bcd-561d-7492-d35a-f26a5d862931',    //guid(),
+                            'PostalCode': '94105',
+                            'Street': '123 Mission St',
+
+                            title: '123 Mission',
+                            description: 'Just some office .'
+                        },
+                        {
+                            // key: 'e8e97516-ef23-6e1b-b79f-aa9ae86ab62e', //guid(),
+                            Street: '1 Market St',
+                            City: 'San Francisco',
+                            State: 'CA',
+                            Country: 'USA',
+
+                            title: 'Landmark',
+                            description: 'Literally a historical \'landmark\'.'
+                        },
+                        {
+                            // key: '12d39bcd-561d-7492-d35a-f26a5d862931',    //guid(),
+                            'PostalCode': '94105',
+                            'Street': '1 California St',
+
+                            title: 'One Cal',
+                            description: 'Big windows and beautiful views.'
+                        }
+                    ],
+                    groupTitle: 'Salesforce Locations in San Francisco',
+                };
+            };
+
+            window.postMessage(incoming, '*')
+            // stub incoming object and verify values
+        })
+    });
+
+    deascribe('geocode', () => {
+        it('valid address specified', () => {
+            var address = { Street: '1 Market St', PostalCode: 94105 };
+            expect(geocode(address).toBe({ lat: 37.794243, lng: -122.394930 }))
+        });
+
+        it('invalid address specified', () => {
+            var address = { PostalCode: 12345}
+            expect(geocode(address).catch(e => {
+                e.toBe('Unable to geocode ' + address);
+            }))
+        });
+    });
+
+    describe('getComputedLatLng', () => {
+        it('lat,lng specified', () => {
+            var position = { Latitude: 30, Longitude: 120 };
+            expect(getComputedLatLng(), { lat: 30, lng: 120 });
+        });
+
+        it('bad lat,lng specified', () => {
+            var position = { Latitude: 200, Longitude: 500 };
+            expect(getComputedLatLng(), { lat: 200, lng: 500 });
+        })
+
+        it('invalid data specified', () => {
+            var position = { lats: 30, longs: 120 };
+            expect(getComputedLatLng().catch(e => {
+                e.toBe('Invalid marker format. Please specify both Latitude and Longitude, or one of PostalCode, City, State or Country');
+            }))
+        });
+
+        it('address info specified', () => {
+            var position = { Street: '1 Market St', City: 'San Francisco' };
+            expect(getComputedLatLng().toBe({ lat: 37.794243, lng: -122.394930 }));
+        });
+
+        it('address street only specified, () => {
+            var position = { Street: '1 Market St' }
+            expect(getComputedLatLng().catch(e => {
+                e.toBe('Invalid marker format. Please specify both Latitude and Longitude, or one of PostalCode, City, State or Country');
+            }))
+        });
+    });
+
+
+}) -->
